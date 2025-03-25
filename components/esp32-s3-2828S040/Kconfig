@@ -1,0 +1,8 @@
+#
+# SPDX-FileCopyrightText: 2025 Hugo Trippaers
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+menu "Board Support Package"
+endmenu

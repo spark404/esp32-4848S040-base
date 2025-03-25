@@ -1,0 +1,19 @@
+#
+# SPDX-FileCopyrightText: 2025 Hugo Trippaers
+#
+# SPDX-License-Identifier: Apache-2.0
+#
+
+version: "0.1.0"
+description: BSP for ESP32S3 4848S040
+url: https://github.com/spark404/esp32-s3-4848S040
+
+tags:
+  - bsp
+
+dependencies:
+  idf: ">=5.0"
+  espressif/esp_lvgl_port: "^2.5.0"
+  espressif/esp_lcd_st7701: "^1.1.1"
+  espressif/esp_lcd_touch_gt911: "^1.1.2"
+  espressif/esp_lcd_panel_io_additions: "^1.0.0"
