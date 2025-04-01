@@ -1,0 +1,7 @@
+SET(SOURCES screens/ui_Screen1.c
+        ui.c
+        components/ui_comp_hook.c
+        ui_helpers.c
+        images/ui_img_anime_480x480_png.c)
+
+idf_component_register(ui SRCS ${SOURCES} INCLUDE_DIRS .)

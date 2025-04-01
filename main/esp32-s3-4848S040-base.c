@@ -4,6 +4,7 @@
 #include <esp_lcd_touch_gt911.h>
 #include <esp_log.h>
 #include <esp_lvgl_port.h>
+#include <esp_wifi.h>
 
 #include <portmacro.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@
 #include <soc/gpio_num.h>
 
 #include "bsp.h"
+#include "ui.h"
 
 #define TAG "app_main"
 
@@ -23,8 +25,160 @@ extern lv_image_dsc_t RGB_24bits_palette_color_test_chart;
 static lv_disp_t * disp_handle = NULL;
 static lv_indev_t* touch_handle = NULL;
 
+// From ST7701S_HSD3.95IPS(HSD040BPN1)480x480_V1.0 -RGB 验证OK20230531.txt
+static const st7701_lcd_init_cmd_t lcd_init_cmds_orig[] = {
+        {0xFF, (uint8_t []){0x77, 0x01, 0x00, 0x00, 0x13}, 5, 0},
+        {0xEF, (uint8_t []){0x08}, 1, 0},
+
+        {0xFF, (uint8_t []){0x77, 0x01, 0x00, 0x00, 0x10}, 5, 0},
+        {0xC0, (uint8_t []){0x3B, 0x00}, 2, 0},
+        {0xC1, (uint8_t []){0x0D, 0x02}, 2, 0},
+        {0xC2, (uint8_t []){0x21, 0x08}, 2, 0},
+        {0xCD, (uint8_t []){0x00}, 1, 0}, // MDT
+        {
+            0xB0,
+            (uint8_t []){
+                0x00, 0x11, 0x18, 0x0E, 0x11, 0x06, 0x07, 0x08, 0x07, 0x22, 0x04, 0x12, 0x0F, 0xAA, 0x31, 0x18
+            },
+            16, 0
+        },
+        {
+            0xB1,
+            (uint8_t []){
+                0x00, 0x11, 0x19, 0x0E, 0x12, 0x07, 0x08, 0x08, 0x08, 0x22, 0x04, 0x11, 0x11, 0xA9, 0x32, 0x18
+            },
+            16, 0
+        },
+
+        {0xFF, (uint8_t []){0x77, 0x01, 0x00, 0x00, 0x11}, 5, 0},
+        {0xB0, (uint8_t []){0x60}, 1, 0}, // Vop=4.7375v
+        {0xB1, (uint8_t []){0x30}, 1, 0},
+        {0xB2, (uint8_t []){0x87}, 1, 0},
+        {0xB3, (uint8_t []){0x80}, 1, 0},
+        {0xB5, (uint8_t []){0x49}, 1, 0}, // VGL=-10.17v
+        {0xB7, (uint8_t []){0x85}, 1, 0},
+        {0xB8, (uint8_t []){0x21}, 1, 0}, // AVDD=6.6 & AVCL=-4.6
+        {0xC1, (uint8_t []){0x78}, 1, 0},
+        {0xC2, (uint8_t []){0x78}, 1, 20},
+        {0xE0, (uint8_t []){0x00, 0x1B, 0x02}, 3, 0},
+        {0xE1, (uint8_t []){0x08, 0xA0, 0x00, 0x00, 0x07, 0xA0, 0x00, 0x00, 0x00, 0x44, 0x44}, 11, 0},
+        {0xE2, (uint8_t []){0x11, 0x11, 0x44, 0x44, 0xED, 0xA0, 0x00, 0x00, 0xEC, 0xA0, 0x00, 0x00}, 12, 0},
+        {0xE3, (uint8_t []){0x00, 0x00, 0x11, 0x11}, 4, 0},
+        {0xE4, (uint8_t []){0x44, 0x44}, 2, 0},
+        {
+            0xE5,
+            (uint8_t []){
+                0x0A, 0xE9, 0xD8, 0xA0, 0x0C, 0xEB, 0xD8, 0xA0, 0x0E, 0xED, 0xD8, 0xA0, 0x10, 0xEF, 0xD8, 0xA0
+            },
+            16, 0
+        },
+        {0xE6, (uint8_t []){0x00, 0x00, 0x11, 0x11}, 4, 0},
+        {0xE7, (uint8_t []){0x44, 0x44}, 2, 0},
+        {
+            0xE8,
+            (uint8_t []){
+                0x09, 0xE8, 0xD8, 0xA0, 0x0B, 0xEA, 0xD8, 0xA0, 0x0D, 0xEC, 0xD8, 0xA0, 0x0F, 0xEE, 0xD8, 0xA0
+            },
+            16, 0
+        },
+        {0xEB, (uint8_t []){0x02, 0x00, 0xE4, 0xE4, 0x88, 0x00, 0x40}, 7, 0},
+        {0xEC, (uint8_t []){0x3C, 0x00}, 2, 0},
+        {
+            0xED,
+            (uint8_t []){
+                0xAB, 0x89, 0x76, 0x54, 0x02, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x20, 0x45, 0x67, 0x98, 0xBA
+            },
+            16, 0
+        },
+
+        {0xFF, (uint8_t []){0x77, 0x01, 0x00, 0x00, 0x00}, 5, 0},
+
+        // Set from panel_config
+        //{0x3A, (uint8_t []){0x66}, 1, 0},  // 18 BPP
+        //{0x36, (uint8_t []){0x08}, 1, 0},  // BGR
+        {0x11, NULL, 0, 120},
+        {0x29, NULL, 0, 0}, // Display On
+    };
+
+static QueueHandle_t wifi_command_queue;
+static QueueHandle_t wifi_event_queue;
+
+void event_handler(lv_event_t* e) {
+    lv_event_code_t code = lv_event_get_code(e);
+
+    if(code == LV_EVENT_CLICKED) {
+        LV_LOG_USER("Clicked");
+    }
+}
+
+#define WIFI_COMAMND_START_SCAN (1 << 0)
+#define WIFI_EVENT_SCAN_COMPLETE (1 << 0)
+typedef struct {
+    QueueHandle_t wifi_event_queue;
+    QueueHandle_t wifi_command_queue;
+} wifi_task_config_t;
+
+typedef struct {
+    uint16_t event_id;
+    void *context;
+} ui_wifi_event_t;
+
+typedef struct {
+    uint16_t command_id;
+    void *context;
+} ui_wifi_command_t;
+
+void wifi_task(void *pvParameter) {
+    wifi_task_config_t *config = (wifi_task_config_t *)pvParameter;
+
+    wifi_init_config_t wifi_config = WIFI_INIT_CONFIG_DEFAULT();
+    esp_wifi_init(&wifi_config);
+
+    ui_wifi_command_t wifi_command;
+    while (1) {
+        if (xQueueReceive(wifi_command_queue, &wifi_command, portMAX_DELAY)) {
+            if (wifi_command.command_id == WIFI_COMAMND_START_SCAN) {
+                esp_wifi_scan_start(NULL, true);
+                ESP_LOGI("wifi_task","Start scan command");
+                ui_wifi_event_t wifi_event = {
+                    .event_id = WIFI_EVENT_SCAN_COMPLETE,
+                };
+                xQueueSend(wifi_event_queue, &wifi_event, 10);
+            }
+        }
+    }
+}
+
+void wifi_start_scan(void *context) {
+    ESP_LOGI("wifi_start_scan", "Requesting start scan");
+    ui_wifi_command_t wifi_command = {
+        .command_id = WIFI_COMAMND_START_SCAN,
+        .context = context
+    };
+    xQueueSend(wifi_command_queue, &wifi_command, ( TickType_t ) 10 );
+}
+
+void ui_task(void *pvParameter) {
+    // Initialize the UI
+    lvgl_port_lock(0);
+    ui_init();
+    lvgl_port_unlock();
+
+    ui_wifi_event_t wifi_event;
+    while (1) {
+        if (xQueueReceive(wifi_event_queue, &wifi_event, portMAX_DELAY)) {
+            if (wifi_event.event_id == WIFI_EVENT_SCAN_COMPLETE) {
+                ESP_LOGI("wifi_event","Event scan complete");
+                lvgl_port_lock(0);
+                lv_dropdown_set_options(ui_Dropdown1, "Koffie\nThee");
+                lvgl_port_unlock();
+            }
+        }
+    }
+}
+
 void app_main(void) {
-    esp_task_wdt_stop();
+    //esp_task_wdt_stop();
 
     const gpio_config_t bk_gpio_config = {
         .mode = GPIO_MODE_OUTPUT,
@@ -85,84 +239,10 @@ void app_main(void) {
         .bounce_buffer_size_px = LCD_H_RES * 10
     };
 
-    st7701_lcd_init_cmd_t lcd_init_cmds[] = {
-        //   cmd   data        data_size  delay_ms
-        {0xFF, (uint8_t []){0x77, 0x01, 0x00, 0x00, 0x10}, 5, 0},
-        {0xC0, (uint8_t []){0x3B, 0x00}, 2, 0},
-        {0xC1, (uint8_t []){0x0D, 0x02}, 2, 0},
-        {0xC2, (uint8_t []){0x31, 0x05}, 2, 0},
-        {
-            0xB0,
-            (uint8_t []){
-                0x00, 0x11, 0x18, 0x0E, 0x11, 0x06, 0x07, 0x08, 0x07, 0x22, 0x04, 0x12, 0x0F, 0xAA, 0x31, 0x18
-            },
-            16, 0
-        },
-        {
-            0xB1,
-            (uint8_t []){
-                0x00, 0x11, 0x19, 0x0E, 0x12, 0x07, 0x08, 0x08, 0x08, 0x22, 0x04, 0x11, 0x11, 0xA9, 0x31, 0x18
-            },
-            16, 0
-        },
-        {0xFF, (uint8_t []){0x77, 0x01, 0x00, 0x00, 0x11}, 5, 0},
-        {0xB0, (uint8_t []){0x60}, 1, 0}, // Vop=4.7375v
-        {0xB1, (uint8_t []){0x32}, 1, 0}, // VCOM=32
-        {0xB2, (uint8_t []){0x07}, 1, 0}, // VGH=15v
-        {0xB3, (uint8_t []){0x80}, 1, 0},
-        {0xB5, (uint8_t []){0x49}, 1, 0}, // VGL=-10.17v
-        {0xB7, (uint8_t []){0x85}, 1, 0},
-        {0xB8, (uint8_t []){0x21}, 1, 0}, // AVDD=6.6 & AVCL=-4.6
-        {0xC1, (uint8_t []){0x78}, 1, 0},
-        {0xC2, (uint8_t []){0x78}, 1, 0},
-        {0xE0, (uint8_t []){0x00, 0x1B, 0x02}, 3, 0},
-        {0xE1, (uint8_t []){0x08, 0xA0, 0x00, 0x00, 0x07, 0xA0, 0x00, 0x00, 0x00, 0x44, 0x44}, 11, 0},
-        {0xE2, (uint8_t []){0x11, 0x11, 0x44, 0x44, 0xED, 0xA0, 0x00, 0x00, 0xEC, 0xA0, 0x00, 0x00}, 12, 0},
-        {0xE3, (uint8_t []){0x00, 0x00, 0x11, 0x11}, 4, 0},
-        {0xE4, (uint8_t []){0x44, 0x44}, 2, 0},
-        {
-            0xE5,
-            (uint8_t []){
-                0x0A, 0xE9, 0xD8, 0xA0, 0x0C, 0xEB, 0xD8, 0xA0, 0x0E, 0xED, 0xD8, 0xA0, 0x10, 0xEF, 0xD8, 0xA0
-            },
-            16, 0
-        },
-        {0xE6, (uint8_t []){0x00, 0x00, 0x11, 0x11}, 4, 0},
-        {0xE7, (uint8_t []){0x44, 0x44}, 2, 0},
-        {
-            0xE8,
-            (uint8_t []){
-                0x09, 0xE8, 0xD8, 0xA0, 0x0B, 0xEA, 0xD8, 0xA0, 0x0D, 0xEC, 0xD8, 0xA0, 0x0F, 0xEE, 0xD8, 0xA0
-            },
-            16, 0
-        },
-        {0xEB, (uint8_t []){0x02, 0x00, 0xE4, 0xE4, 0x88, 0x00, 0x40}, 7, 0},
-        {0xEC, (uint8_t []){0x3C, 0x00}, 2, 0},
-        {
-            0xED,
-            (uint8_t []){
-                0xAB, 0x89, 0x76, 0x54, 0x02, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0x20, 0x45, 0x67, 0x98, 0xBA
-            },
-            16, 0
-        },
-
-        //-----------VAP & VAN---------------
-        {0xFF, (uint8_t []){0x77, 0x01, 0x00, 0x00, 0x13}, 5, 0},
-        {0xE5, (uint8_t []){0xE4}, 1, 0},
-        {0xFF, (uint8_t []){0x77, 0x01, 0x00, 0x00, 0x00}, 5, 0},
-
-        // This is configured by esp_lcd_panel_dev_config_t
-        // {0x3A, (uint8_t []){0x60}, 1, 10}, // 0x70 RGB888, 0x60 RGB666, 0x50 RGB565
-
-        {0x11, NULL, 0, 120},
-        {0x29, NULL, 0, 0}, // Display On
-
-    };
-
     st7701_vendor_config_t vendor_config = {
         .rgb_config = &rgb_config,
-        .init_cmds = lcd_init_cmds, // Uncomment these line if use custom initialization commands
-        .init_cmds_size = sizeof(lcd_init_cmds) / sizeof(st7701_lcd_init_cmd_t),
+        .init_cmds = lcd_init_cmds_orig, // Uncomment these line if use custom initialization commands
+        .init_cmds_size = sizeof(lcd_init_cmds_orig) / sizeof(st7701_lcd_init_cmd_t),
         .flags = {
             .mirror_by_cmd = 1, // Only work when `enable_io_multiplex` is set to 0
             .enable_io_multiplex = 0, /**
@@ -280,19 +360,17 @@ void app_main(void) {
         ESP_LOGE(TAG, "Unable to setup touchpad");
     }
 
+    wifi_command_queue = xQueueCreate(1, sizeof(ui_wifi_command_t));
+    wifi_event_queue = xQueueCreate(1, sizeof(ui_wifi_event_t));
 
-    lv_obj_t *scr = lv_scr_act();
+    const wifi_task_config_t config = {
+        .wifi_command_queue = wifi_command_queue,
+        .wifi_event_queue = wifi_event_queue
+    };
 
-    lvgl_port_lock(0);
-    lv_obj_t *background = lv_img_create(scr);
-    lv_img_set_src(background, &anime_480x480);
-    lv_obj_align(background, LV_ALIGN_TOP_LEFT, 0, 0);
+    xTaskCreate(wifi_task, "wifi_task", 8192, (void *)&config, 5, NULL);
+    xTaskCreate(ui_task, "ui_task", 8192, NULL, 5, NULL);
 
-    // lv_obj_t *img_logo = lv_img_create(scr);
-    // lv_img_set_src(img_logo, &RGB_24bits_palette_color_test_chart);
-    // lv_obj_align(img_logo, LV_ALIGN_CENTER, 0, 0);
-
-    lvgl_port_unlock();
 
     while (true) {
         vTaskDelay(100 /portTICK_PERIOD_MS);
